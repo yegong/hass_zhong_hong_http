@@ -196,6 +196,8 @@ ConfigEntry -> async client -> coordinator -> climate entities
 - 网关状态快照只以室内机数据判等；coordinator 通知后，每个 climate 实体还需独立比较自身室内机快照，只为真实变化或可用性变化写入 HA state；
 - 室内机轮询间隔由 options 限制为 5–300 秒；网关身份、版本和错误码固定每 5 分钟轮询；
 - VRF 网关 device 提供室内机状态刷新 button；按下后立即刷新室内机 coordinator 并重置其下一次轮询计时，不强制刷新网关信息 coordinator；
+- 启用外部 climate 监听时，有效控制状态变化后不立即查询，而在 1 秒和 2 秒分别刷新室内机 coordinator；
+- transport 错误最多额外重试 2 次，间隔 250 ms/500 ms；认证失败和 API 非零 `err` 不属于可重试 transport 错误；
 - coordinator 负责把通信错误转换为 `UpdateFailed`，首次连接失败交由 `ConfigEntryNotReady` 路径；认证失败使用相应 auth flow；
 - entity 继承 `CoordinatorEntity`，由 coordinator 可用性驱动 unavailable；
 - 动态新增室内机必须能在不重载 Integration 的情况下添加 entity。室内机暂时缺失时先标记不可用；删除 stale device 前需要明确、保守的策略；

@@ -5,12 +5,19 @@
 > [!IMPORTANT]
 > 本项目目前是早期可测试版本，仅针对用户提供的 Aqara EigenStone 实机协议结果实现，尚未宣称兼容所有中弘、日立或 Aqara 设备变体。
 
+## 核心亮点：让轮询状态更及时
+
+除了常规定时轮询，本 Integration 还能监听 Home Assistant 中由**其他 Integration 创建的 `climate` 实体**。当这些实体发生开关、HVAC 模式或目标温度变化时，它会主动回读中弘 VRF，让对应空调状态无需一直等待下一个轮询周期。
+
+这尤其适合一套空调同时通过 HomeKit、厂商 Integration 或其他控制入口暴露到 Home Assistant 的场景：外部 climate 的变化只用来加速刷新，最终状态仍以 VRF 网关实际回读结果为准，不会把另一个实体的状态直接复制到本 Integration。
+
 ## 项目目标
 
 项目以 Home Assistant 自定义 Integration 的形式工作，不依赖 Node-RED 或 MQTT。一个中弘网关作为 hub，每台由网关枚举出的室内机对应一个 `climate` 实体。Integration domain 为 `zhong_hong_http`，与 Home Assistant 官方 `zhong_hong` 区分。
 
 当前实现：
 
+- **跨 Integration 的 climate 变化感知刷新，让轮询型 VRF 获得更接近事件回调的响应速度；**
 - 自动枚举网关下的室内机；
 - 显示开关状态、运行模式、目标温度、室内温度和风速；
 - 控制开关、制冷/制热/除湿/送风模式、目标温度和风速；
@@ -18,7 +25,6 @@
 - 本地异步通信；室内机集中轮询间隔可设置为 5–300 秒；
 - 每 5 分钟读取网关设备编号、型号、软件版本及错误码；
 - 在 VRF 网关设备下提供室内机状态刷新按钮；
-- 可选监听其他 Integration 的 climate 控制状态变化并触发回读；
 - 仅在对应室内机数据或可用性实际变化时向 Home Assistant 写入实体状态；
 - 动态发现新增室内机，并正确反映设备离线状态。
 
@@ -121,7 +127,9 @@ VRF 网关 device 下的“刷新室内机状态”按钮会立即读取全部�
 
 每次控制请求成功后，Integration 会在 1 秒和 2 秒各安排一次后台状态读取，给网关留出状态落地时间；第二次读取也会把下一次周期轮询顺延。考虑到该 body-only HTTP 网关的并发能力有限，同一 VRF 的 `f=1`、完整 `f=17` 分页读取和 `f=18` 控制会共用一个异步锁串行执行；不同网关之间不互相阻塞。控制的完整参数以最近一次设备轮询状态补齐，不保存本地的未确认控制状态。
 
-启用“其他空调变化时刷新”后，Integration 会监听其他 config entry 创建的 `climate` 实体。其开关/HVAC 模式（entity state）或目标温度变化时，会请求一次室内机状态刷新；本 Integration 自己创建的 climate 会按 config entry 排除，以免形成递归。当前温度等非控制属性变化不会触发刷新。
+启用“其他空调变化时刷新”后，Integration 会监听其他 config entry 创建的 `climate` 实体。其开关/HVAC 模式（entity state）或目标温度变化时，会等待状态落地并在 1 秒、2 秒各请求一次室内机状态刷新，不在 0 秒立即查询；本 Integration 自己创建的 climate 会按 config entry 排除，以免形成递归。当前温度等非控制属性变化不会触发刷新。
+
+每个底层 HTTP 请求在发生可重试的 transport 失败时会最多额外尝试 2 次，间隔为 250 ms 和 500 ms。HTTP 认证失败和设备明确返回的非零 `err` 不重试。重试仍在同一 VRF 的请求锁内执行。
 
 轮询或手动刷新所得的完整网关快照只以室内机数据判定是否变化；当其中一台内机变化时，也只有那台内机的 climate 实体会写入新 state。通信失败和恢复导致的可用性变化仍会正常发布。
 
@@ -135,7 +143,7 @@ logger:
     custom_components.zhong_hong_http: debug
 ```
 
-重启 Home Assistant 后，日志会显示 climate 事件是否被收到及忽略原因、刷新请求是否完成，以及每个网关请求的功能号/页码/内机索引、传输类型、响应大小和异常链。不会输出密码、Authorization header 或完整控制 URL；日志仍可能包含实体 ID、内机地址和本地 IP，公开分享前请脱敏。调试完成后建议移除这些 debug 设置。
+重启 Home Assistant 后，日志会显示 climate 事件是否被收到及忽略原因、1/2 秒延迟刷新是否完成，以及每个网关请求的功能号/页码/内机索引、当前重试次数、传输类型、响应大小和异常链。不会输出密码、Authorization header 或完整控制 URL；日志仍可能包含实体 ID、内机地址和本地 IP，公开分享前请脱敏。调试完成后建议移除这些 debug 设置。
 
 ### 升级与卸载
 

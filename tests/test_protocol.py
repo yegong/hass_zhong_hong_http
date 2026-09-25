@@ -11,7 +11,7 @@ from collections import deque
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 # Loading the protocol modules through a private package avoids importing the
 # Home Assistant-dependent integration __init__ in this lightweight test env.
@@ -35,6 +35,7 @@ parse_gateway_info = models_module.parse_gateway_info
 parse_indoor_unit = models_module.parse_indoor_unit
 TransportResponse = transport_module.TransportResponse
 ZhonghongAuthenticationError = transport_module.ZhonghongAuthenticationError
+ZhonghongTransportError = transport_module.ZhonghongTransportError
 Endpoint = transport_module.Endpoint
 ZhonghongTransport = transport_module.ZhonghongTransport
 parse_response = transport_module.parse_response
@@ -54,7 +55,10 @@ class ConfigurationConstantsTests(unittest.TestCase):
         self.assertFalse(const_module.DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES)
 
     def test_control_readbacks_are_delayed_one_and_two_seconds(self) -> None:
-        self.assertEqual(const_module.CONTROL_REFRESH_DELAYS, (1.0, 2.0))
+        self.assertEqual(const_module.STATE_SETTLE_REFRESH_DELAYS, (1.0, 2.0))
+
+    def test_transport_retry_delays_are_quarter_and_half_second(self) -> None:
+        self.assertEqual(const_module.TRANSPORT_RETRY_DELAYS, (0.25, 0.5))
 
 
 def _unit_payload(**updates: object) -> dict[str, object]:
@@ -214,6 +218,42 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("transport=body-only", log_output)
         self.assertNotIn("Authorization", log_output)
         self.assertNotIn("YWRtaW46", log_output)
+
+    async def test_retries_transport_failures_twice_with_backoff(self) -> None:
+        transport = ZhonghongTransport(Endpoint("192.0.2.1", 80), "admin", "")
+        exchange = AsyncMock(
+            side_effect=[
+                ZhonghongTransportError("first failure"),
+                ZhonghongTransportError("second failure"),
+                b'{"err":0}',
+            ]
+        )
+        sleep = AsyncMock()
+
+        with (
+            patch.object(transport, "_async_exchange", exchange),
+            patch.object(transport_module.asyncio, "sleep", sleep),
+        ):
+            response = await transport.async_request((("f", 18), ("idx", 3)))
+
+        self.assertEqual(response.body, b'{"err":0}')
+        self.assertEqual(exchange.await_count, 3)
+        sleep.assert_has_awaits([call(0.25), call(0.5)])
+
+    async def test_does_not_retry_authentication_failure(self) -> None:
+        transport = ZhonghongTransport(Endpoint("192.0.2.1", 80), "admin", "")
+        exchange = AsyncMock(return_value=b"HTTP/1.1 401 Unauthorized\r\n\r\n")
+        sleep = AsyncMock()
+
+        with (
+            patch.object(transport, "_async_exchange", exchange),
+            patch.object(transport_module.asyncio, "sleep", sleep),
+            self.assertRaises(ZhonghongAuthenticationError),
+        ):
+            await transport.async_request((("f", 1),))
+
+        self.assertEqual(exchange.await_count, 1)
+        sleep.assert_not_awaited()
 
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):

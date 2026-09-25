@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -15,7 +16,7 @@ from homeassistant.core import (
 )
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import DOMAIN, STATE_SETTLE_REFRESH_DELAYS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -75,13 +76,17 @@ def async_setup_other_climate_listener(
             return
 
         LOGGER.debug(
-            "Requesting indoor-unit refresh for climate event from %s", entity_id
+            "Scheduling indoor-unit refreshes for climate event from %s after %s "
+            "seconds",
+            entity_id,
+            STATE_SETTLE_REFRESH_DELAYS,
         )
-        entry.async_create_background_task(
-            hass,
-            _async_request_refresh(entry, entity_id),
-            f"{DOMAIN} refresh after external climate change",
-        )
+        for delay in STATE_SETTLE_REFRESH_DELAYS:
+            entry.async_create_background_task(
+                hass,
+                _async_request_refresh_after(entry, entity_id, delay),
+                f"{DOMAIN} external climate readback after {delay:g}s",
+            )
 
     entry.async_on_unload(
         hass.bus.async_listen(
@@ -92,15 +97,24 @@ def async_setup_other_climate_listener(
     )
 
 
-async def _async_request_refresh(
+async def _async_request_refresh_after(
     entry: ZhonghongConfigEntry,
     source_entity_id: str,
+    delay: float,
 ) -> None:
-    """Request and log a refresh caused by another climate entity."""
-    coordinator = entry.runtime_data.coordinator
-    await coordinator.async_request_refresh()
+    """Request and log a delayed refresh caused by another climate entity."""
+    await asyncio.sleep(delay)
     LOGGER.debug(
-        "Refresh request for climate event from %s completed: success=%s",
+        "Requesting indoor-unit refresh %.1f seconds after climate event from %s",
+        delay,
+        source_entity_id,
+    )
+    coordinator = entry.runtime_data.coordinator
+    await coordinator.async_refresh()
+    LOGGER.debug(
+        "Refresh request %.1f seconds after climate event from %s completed: "
+        "success=%s",
+        delay,
         source_entity_id,
         coordinator.last_update_success,
     )

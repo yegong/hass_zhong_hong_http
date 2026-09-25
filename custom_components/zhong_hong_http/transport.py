@@ -11,7 +11,12 @@ from ipaddress import IPv6Address
 from itertools import count
 from urllib.parse import urlencode
 
-from .const import DEFAULT_PORT, MAX_RESPONSE_BYTES, REQUEST_TIMEOUT
+from .const import (
+    DEFAULT_PORT,
+    MAX_RESPONSE_BYTES,
+    REQUEST_TIMEOUT,
+    TRANSPORT_RETRY_DELAYS,
+)
 
 READ_SIZE = 64 * 1024
 LOGGER = logging.getLogger(__name__)
@@ -200,7 +205,6 @@ class ZhonghongTransport:
         safe_fields = {
             name: value for name, value in parameters if name in {"f", "p", "idx"}
         }
-        LOGGER.debug("Starting gateway request %s: %s", request_id, safe_fields)
         target = f"/cgi-bin/api.html?{urlencode(parameters)}"
         request = (
             f"GET {target} HTTP/1.1\r\n"
@@ -212,34 +216,76 @@ class ZhonghongTransport:
             "\r\n"
         ).encode("ascii")
 
-        try:
-            try:
-                raw_response = await asyncio.wait_for(
-                    self._async_exchange(request),
-                    timeout=self._request_timeout,
-                )
-            except TimeoutError as err:
-                raise ZhonghongTransportError(
-                    f"gateway request timed out after {self._request_timeout:g} seconds"
-                ) from err
-            response = parse_response(raw_response)
-        except ZhonghongTransportError as err:
+        attempt_count = len(TRANSPORT_RETRY_DELAYS) + 1
+        for attempt in range(1, attempt_count + 1):
             LOGGER.debug(
-                "Gateway request %s failed (%s): %s",
+                "Starting gateway request %s attempt %s/%s: %s",
                 request_id,
-                type(err).__name__,
-                err,
-                exc_info=True,
+                attempt,
+                attempt_count,
+                safe_fields,
             )
-            raise
+            try:
+                response = await self._async_request_once(request)
+            except ZhonghongAuthenticationError:
+                LOGGER.debug(
+                    "Gateway request %s authentication failed on attempt %s/%s",
+                    request_id,
+                    attempt,
+                    attempt_count,
+                    exc_info=True,
+                )
+                raise
+            except ZhonghongTransportError as err:
+                if attempt == attempt_count:
+                    LOGGER.debug(
+                        "Gateway request %s exhausted %s attempts (%s): %s",
+                        request_id,
+                        attempt_count,
+                        type(err).__name__,
+                        err,
+                        exc_info=True,
+                    )
+                    raise
+                delay = TRANSPORT_RETRY_DELAYS[attempt - 1]
+                LOGGER.debug(
+                    "Gateway request %s attempt %s/%s failed (%s): %s; "
+                    "retrying in %.3f seconds",
+                    request_id,
+                    attempt,
+                    attempt_count,
+                    type(err).__name__,
+                    err,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
 
-        LOGGER.debug(
-            "Gateway request %s completed: transport=%s response_bytes=%s",
-            request_id,
-            response.transport,
-            len(response.body),
-        )
-        return response
+            LOGGER.debug(
+                "Gateway request %s completed on attempt %s/%s: "
+                "transport=%s response_bytes=%s",
+                request_id,
+                attempt,
+                attempt_count,
+                response.transport,
+                len(response.body),
+            )
+            return response
+
+        raise AssertionError("unreachable")
+
+    async def _async_request_once(self, request: bytes) -> TransportResponse:
+        """Perform one transport attempt without retrying."""
+        try:
+            raw_response = await asyncio.wait_for(
+                self._async_exchange(request),
+                timeout=self._request_timeout,
+            )
+        except TimeoutError as err:
+            raise ZhonghongTransportError(
+                f"gateway request timed out after {self._request_timeout:g} seconds"
+            ) from err
+        return parse_response(raw_response)
 
     async def _async_exchange(self, request: bytes) -> bytes:
         """Exchange bytes with the gateway over one TCP connection."""

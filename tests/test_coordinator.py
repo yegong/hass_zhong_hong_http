@@ -127,7 +127,7 @@ class CoordinatorControlTests(unittest.IsolatedAsyncioTestCase):
         coordinator = coordinator_module.ZhonghongCoordinator(object(), entry, client)
         coordinator.data = models.GatewayState({unit.key: unit}, 1, ("body-only",))
 
-        with patch.object(coordinator_module, "CONTROL_REFRESH_DELAYS", (0.0,)):
+        with patch.object(coordinator_module, "STATE_SETTLE_REFRESH_DELAYS", (0.0,)):
             await coordinator.async_control_unit(unit.key, is_on=True)
             await coordinator.async_control_unit(unit.key, target_temperature=25)
             await asyncio.gather(*tasks)

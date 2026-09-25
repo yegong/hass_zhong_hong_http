@@ -9,7 +9,7 @@ import unittest
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, call, patch
 
 PACKAGE_NAME = "_zhong_hong_http_monitor_tests"
 PACKAGE_PATH = Path(__file__).parents[1] / "custom_components" / "zhong_hong_http"
@@ -78,6 +78,10 @@ class OtherClimateMonitorTests(unittest.IsolatedAsyncioTestCase):
         debug_patcher = patch.object(monitor.LOGGER, "debug")
         debug_log = debug_patcher.start()
         self.addCleanup(debug_patcher.stop)
+        sleep = AsyncMock()
+        sleep_patcher = patch.object(monitor.asyncio, "sleep", sleep)
+        sleep_patcher.start()
+        self.addCleanup(sleep_patcher.stop)
         callbacks: list[Callable[[object], None]] = []
         event_filters: list[Callable[[dict[str, object]], bool]] = []
         tasks: list[asyncio.Task[None]] = []
@@ -99,7 +103,7 @@ class OtherClimateMonitorTests(unittest.IsolatedAsyncioTestCase):
             refresh_count = 0
             last_update_success = True
 
-            async def async_request_refresh(self) -> None:
+            async def async_refresh(self) -> None:
                 self.refresh_count += 1
 
         coordinator = Coordinator()
@@ -162,7 +166,11 @@ class OtherClimateMonitorTests(unittest.IsolatedAsyncioTestCase):
         )
         await asyncio.gather(*tasks)
 
-        self.assertEqual(coordinator.refresh_count, 2)
+        self.assertEqual(coordinator.refresh_count, 4)
+        sleep.assert_has_awaits(
+            [call(1.0), call(2.0), call(1.0), call(2.0)],
+            any_order=True,
+        )
         log_templates = [call.args[0] for call in debug_log.call_args_list]
         self.assertIn(
             "Observed climate event for %s: state=%s->%s target_temperature=%s->%s",
@@ -174,7 +182,13 @@ class OtherClimateMonitorTests(unittest.IsolatedAsyncioTestCase):
             log_templates,
         )
         self.assertIn(
-            "Refresh request for climate event from %s completed: success=%s",
+            "Scheduling indoor-unit refreshes for climate event from %s after %s "
+            "seconds",
+            log_templates,
+        )
+        self.assertIn(
+            "Refresh request %.1f seconds after climate event from %s completed: "
+            "success=%s",
             log_templates,
         )
 

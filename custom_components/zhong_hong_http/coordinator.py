@@ -19,10 +19,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .client import ZhonghongApiError, ZhonghongClient
 from .const import (
     CONF_SCAN_INTERVAL,
-    CONTROL_REFRESH_DELAYS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GATEWAY_INFO_INTERVAL,
+    STATE_SETTLE_REFRESH_DELAYS,
     SUPPORTED_FAN_SPEEDS,
     SUPPORTED_MODES,
 )
@@ -181,9 +181,9 @@ class ZhonghongCoordinator(DataUpdateCoordinator[GatewayState]):
             desired.outdoor_unit,
             desired.indoor_unit,
             desired.index,
-            CONTROL_REFRESH_DELAYS,
+            STATE_SETTLE_REFRESH_DELAYS,
         )
-        for delay in CONTROL_REFRESH_DELAYS:
+        for delay in STATE_SETTLE_REFRESH_DELAYS:
             self.config_entry.async_create_background_task(
                 self.hass,
                 self._async_refresh_after(delay),
