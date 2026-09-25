@@ -15,8 +15,9 @@
 - 显示开关状态、运行模式、目标温度、室内温度和风速；
 - 控制开关、制冷/制热/除湿/送风模式、目标温度和风速；
 - 通过 Home Assistant UI 完成配置和重新配置；
-- 本地异步通信；室内机集中轮询间隔可设置为 5–15 秒；
+- 本地异步通信；室内机集中轮询间隔可设置为 5–300 秒；
 - 每 5 分钟读取网关设备编号、型号、软件版本及错误码；
+- 在 VRF 网关设备下提供室内机状态刷新按钮；
 - 动态发现新增室内机，并正确反映设备离线状态。
 
 这里的“自动枚举”是指从已配置网关读取室内机列表。项目尚未确认设备是否提供 mDNS、SSDP 或 DHCP 自动发现能力。
@@ -108,11 +109,13 @@ EigenStone 实机已确认三个主要请求：
 1. 将 `custom_components/zhong_hong_http/` 复制到 Home Assistant 配置目录下同名路径；
 2. 重启 Home Assistant；
 3. 进入“设置 → 设备与服务 → 添加集成”，搜索 **Zhonghong HTTP**；
-4. 输入网关 host、端口和 HTTP Basic Auth 信息，并选择 5–15 秒的室内机轮询间隔。
+4. 输入网关 host、端口和 HTTP Basic Auth 信息，并选择 5–300 秒的室内机轮询间隔。
 
 默认用户名为 `admin`、密码为空、端口为 `80`、室内机轮询间隔为 10 秒。安装后可在 Integration 的“配置”入口修改轮询间隔；连接地址或认证信息使用“重新配置”更新。
 
 HA 中会分别创建一个 VRF 网关 device 和每台室内机 device。网关的设备编号、型号及软件版本写入 device registry；`hwerror` 和 `moduleerror` 当前保留在脱敏 diagnostics 中，不额外创建未经定义码表支持的告警实体。
+
+VRF 网关 device 下的“刷新室内机状态”按钮会立即读取全部室内机，但不会强制刷新 `f=1` 网关信息。本次读取结束后，下一次定时轮询从此刻重新计时。自动化也可以对任意一个本 Integration 的 climate 实体调用 `homeassistant.update_entity` 来请求同一 coordinator 刷新；按钮更适合作为不依赖具体室内机的显式自动化动作。按钮用于 HA 自动化调用，不要求 HomeKit 本身支持 button entity。
 
 ### 升级与卸载
 

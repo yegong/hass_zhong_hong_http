@@ -29,7 +29,7 @@ from .coordinator import (
 )
 from .transport import Endpoint, ZhonghongTransport
 
-PLATFORMS: list[Platform] = [Platform.CLIMATE]
+PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.CLIMATE]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ZhonghongConfigEntry) -> bool:

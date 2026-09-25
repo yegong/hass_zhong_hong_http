@@ -59,7 +59,7 @@
 - VRF 网关和每台室内机在 HA device registry 中分别表示，室内机通过 `via_device_id` 关联到网关；
 - 室内机状态请求为 `GET /cgi-bin/api.html?f=17&p=<page>`，页码从 `0` 开始；实机每个非空页最多返回 5 台室内机，遇到空 `unit` 数组结束；
 - 实机成功响应中的 `err` 是数字 `0`；为兼容参考流程，解析也接受字符串 `"0"`；
-- 室内机状态轮询可由 config flow/options 配置为 5–15 秒；
+- 室内机状态轮询可由 config flow/options 配置为 5–300 秒；
 - 室内机字段语义：
   - `oa`：空调系统/外机编号；
   - `ia`：室内机编号；
@@ -138,6 +138,7 @@ custom_components/zhong_hong_http/
 ├── profile.py           # 协议未提供的温度范围等显式、可迁移能力假设
 ├── coordinator.py       # 室内机/网关信息轮询、可用性与错误映射
 ├── entity.py            # 共享 CoordinatorEntity 基类（有真实共性时才创建）
+├── button.py            # 网关级室内机立即刷新动作
 ├── climate.py           # 纯内存属性和异步控制方法
 ├── diagnostics.py       # 脱敏诊断（达到相应阶段时）
 ├── strings.json
@@ -146,6 +147,7 @@ custom_components/zhong_hong_http/
     └── zh-Hans.json
 tests/
 ├── fixtures/
+├── test_button.py
 ├── test_client.py
 ├── test_config_flow.py
 ├── test_coordinator.py
@@ -190,7 +192,8 @@ ConfigEntry -> async client -> coordinator -> climate entities
 - 所有网络 I/O 使用 async；因实机返回 body-only 响应，transport 使用 `asyncio.open_connection`，不得切换为阻塞客户端；
 - 室内机状态和网关慢速信息分别由 `DataUpdateCoordinator` 协调，并在 setup 时调用 `async_config_entry_first_refresh()`；
 - 数据模型可比较时设置 `always_update=False`，减少无变化状态写入；
-- 室内机轮询间隔由 options 限制为 5–15 秒；网关身份、版本和错误码固定每 5 分钟轮询；
+- 室内机轮询间隔由 options 限制为 5–300 秒；网关身份、版本和错误码固定每 5 分钟轮询；
+- VRF 网关 device 提供室内机状态刷新 button；按下后立即刷新室内机 coordinator 并重置其下一次轮询计时，不强制刷新网关信息 coordinator；
 - coordinator 负责把通信错误转换为 `UpdateFailed`，首次连接失败交由 `ConfigEntryNotReady` 路径；认证失败使用相应 auth flow；
 - entity 继承 `CoordinatorEntity`，由 coordinator 可用性驱动 unavailable；
 - 动态新增室内机必须能在不重载 Integration 的情况下添加 entity。室内机暂时缺失时先标记不可用；删除 stale device 前需要明确、保守的策略；

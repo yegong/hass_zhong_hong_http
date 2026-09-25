@@ -14,7 +14,7 @@ DEFAULT_PORT: Final = 80
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 DEFAULT_SCAN_INTERVAL: Final = 10
 MIN_SCAN_INTERVAL: Final = 5
-MAX_SCAN_INTERVAL: Final = 15
+MAX_SCAN_INTERVAL: Final = 300
 GATEWAY_INFO_INTERVAL: Final = timedelta(minutes=5)
 
 MAX_PAGES: Final = 128

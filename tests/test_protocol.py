@@ -22,6 +22,7 @@ package.__path__ = [str(PACKAGE_PATH)]
 sys.modules.setdefault(PACKAGE_NAME, package)
 
 client_module = importlib.import_module(f"{PACKAGE_NAME}.client")
+const_module = importlib.import_module(f"{PACKAGE_NAME}.const")
 models_module = importlib.import_module(f"{PACKAGE_NAME}.models")
 transport_module = importlib.import_module(f"{PACKAGE_NAME}.transport")
 profile_module = importlib.import_module(f"{PACKAGE_NAME}.profile")
@@ -37,6 +38,16 @@ Endpoint = transport_module.Endpoint
 ZhonghongTransport = transport_module.ZhonghongTransport
 parse_response = transport_module.parse_response
 ZhonghongProfile = profile_module.ZhonghongProfile
+
+
+class ConfigurationConstantsTests(unittest.TestCase):
+    """Test user-configurable polling boundaries."""
+
+    def test_indoor_unit_polling_range_is_five_to_three_hundred_seconds(
+        self,
+    ) -> None:
+        self.assertEqual(const_module.MIN_SCAN_INTERVAL, 5)
+        self.assertEqual(const_module.MAX_SCAN_INTERVAL, 300)
 
 
 def _unit_payload(**updates: object) -> dict[str, object]:

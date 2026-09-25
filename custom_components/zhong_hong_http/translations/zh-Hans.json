@@ -17,7 +17,7 @@
           "port": "本地 HTTP 端口。",
           "username": "HTTP Basic Auth 用户名。",
           "password": "HTTP Basic Auth 密码；出厂默认值为空。",
-          "scan_interval": "室内机状态刷新间隔，可设置为 5 至 15 秒。"
+          "scan_interval": "室内机状态刷新间隔，可设置为 5 至 300 秒。"
         }
       },
       "reconfigure": {
@@ -67,8 +67,15 @@
           "scan_interval": "室内机轮询间隔"
         },
         "data_description": {
-          "scan_interval": "室内机状态刷新间隔，可设置为 5 至 15 秒。"
+          "scan_interval": "室内机状态刷新间隔，可设置为 5 至 300 秒。"
         }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "refresh_indoor_units": {
+        "name": "刷新室内机状态"
       }
     }
   },
