@@ -75,6 +75,9 @@ class OtherClimateMonitorTests(unittest.IsolatedAsyncioTestCase):
                 return None
 
         monitor = _load_monitor(Registry())
+        debug_patcher = patch.object(monitor.LOGGER, "debug")
+        debug_log = debug_patcher.start()
+        self.addCleanup(debug_patcher.stop)
         callbacks: list[Callable[[object], None]] = []
         event_filters: list[Callable[[dict[str, object]], bool]] = []
         tasks: list[asyncio.Task[None]] = []
@@ -94,6 +97,7 @@ class OtherClimateMonitorTests(unittest.IsolatedAsyncioTestCase):
 
         class Coordinator:
             refresh_count = 0
+            last_update_success = True
 
             async def async_request_refresh(self) -> None:
                 self.refresh_count += 1
@@ -159,6 +163,20 @@ class OtherClimateMonitorTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(*tasks)
 
         self.assertEqual(coordinator.refresh_count, 2)
+        log_templates = [call.args[0] for call in debug_log.call_args_list]
+        self.assertIn(
+            "Observed climate event for %s: state=%s->%s target_temperature=%s->%s",
+            log_templates,
+        )
+        self.assertIn("Ignoring own climate entity %s", log_templates)
+        self.assertIn(
+            "Ignoring climate event for %s without a control-state change",
+            log_templates,
+        )
+        self.assertIn(
+            "Refresh request for climate event from %s completed: success=%s",
+            log_templates,
+        )
 
 
 if __name__ == "__main__":

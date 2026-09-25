@@ -74,7 +74,7 @@
 - `grp`、各类 lock、`highestVal`、`lowestVal`、`FlowDirection1/2` 和 `MainRmc` 当前均不使用；
 - 同一 `oa` 下不能同时运行不同 HVAC 模式，但约束由空调主机处理，Integration 不预判或联动其它室内机；
 - 已确认控制请求为 `GET /cgi-bin/api.html?f=18&on=...&mode=...&tempSet=...&fan=...&idx=...`，参数使用普通单个 `&`；`FlowDirection1/2` 不需要发送；成功响应为 body-only `{"err":0}`；
-- 控制按完整状态提交。修改一个字段时优先使用该内机已提交但尚未确认的状态补齐其它字段，否则使用最新轮询缓存；同一网关的控制请求不做全局串行化。控制成功后在 1 秒和 2 秒分别触发一次整网关回读。
+- 控制按完整状态提交。修改一个字段时使用最新轮询缓存补齐其它字段；考虑到 body-only HTTP 网关的并发能力未确认，同一 VRF 网关的查询和控制请求全部串行化。控制成功后在 1 秒和 2 秒分别触发一次整网关回读。
 
 以下未被实机覆盖的内容仍只能视为“参考实现观察”。
 
@@ -159,7 +159,7 @@ tests/
 职责边界：
 
 - `transport.py` 只处理 HTTP 字节、认证、超时和响应兼容；
-- `client.py` 负责 URL 参数、分页协议、原始响应校验和枚举转换；
+- `client.py` 负责 URL 参数、分页协议、原始响应校验、枚举转换和单网关请求串行化；
 - `models.py` 表达稳定领域语义，不向 HA 层泄漏 `tempSet` 等来源字段名；
 - `coordinator.py` 一次轮询整个网关并生成按稳定室内机 ID 索引的数据；
 - `climate.py` 只把 coordinator 内存状态映射为 HA 属性，不能在 property 中 I/O；
@@ -199,7 +199,7 @@ ConfigEntry -> async client -> coordinator -> climate entities
 - coordinator 负责把通信错误转换为 `UpdateFailed`，首次连接失败交由 `ConfigEntryNotReady` 路径；认证失败使用相应 auth flow；
 - entity 继承 `CoordinatorEntity`，由 coordinator 可用性驱动 unavailable；
 - 动态新增室内机必须能在不重载 Integration 的情况下添加 entity。室内机暂时缺失时先标记不可用；删除 stale device 前需要明确、保守的策略；
-- 设置适当的 `PARALLEL_UPDATES`；控制请求无需按网关串行化，分页查询只保证单次查询内的页面顺序。
+- 设置适当的 `PARALLEL_UPDATES`；同一 client/VRF 的网关信息查询、完整分页查询和控制请求共用一个异步锁，不同网关之间仍可并发。
 
 ### Climate 映射
 

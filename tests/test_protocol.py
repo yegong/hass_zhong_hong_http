@@ -193,10 +193,13 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         writer.drain = AsyncMock()
         writer.wait_closed = AsyncMock()
 
-        with patch.object(
-            transport_module.asyncio,
-            "open_connection",
-            AsyncMock(return_value=(reader, writer)),
+        with (
+            self.assertLogs(transport_module.LOGGER, level="DEBUG") as logs,
+            patch.object(
+                transport_module.asyncio,
+                "open_connection",
+                AsyncMock(return_value=(reader, writer)),
+            ),
         ):
             result = await ZhonghongTransport(
                 Endpoint("192.0.2.1", 80), "admin", ""
@@ -207,6 +210,10 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         request = writer.write.call_args.args[0]
         self.assertIn(b"GET /cgi-bin/api.html?f=1 HTTP/1.1\r\n", request)
         self.assertIn(b"Authorization: Basic YWRtaW46\r\n", request)
+        log_output = "\n".join(logs.output)
+        self.assertIn("transport=body-only", log_output)
+        self.assertNotIn("Authorization", log_output)
+        self.assertNotIn("YWRtaW46", log_output)
 
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):
@@ -360,7 +367,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             await client.async_control(unit, target_temperature=17)
         await client.async_control(unit, target_temperature=18)
 
-    async def test_control_requests_are_not_serialized_by_gateway(self) -> None:
+    async def test_control_requests_are_serialized_by_gateway(self) -> None:
         transport = FakeTransport([_response({"err": 0}), _response({"err": 0})])
         client = ZhonghongClient(transport)
         unit = parse_indoor_unit(_unit_payload())
@@ -370,7 +377,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             client.async_control(unit, target_temperature=25),
         )
 
-        self.assertEqual(transport.max_in_flight, 2)
+        self.assertEqual(transport.max_in_flight, 1)
 
     async def test_whole_query_has_total_timeout(self) -> None:
         class SlowTransport(FakeTransport):

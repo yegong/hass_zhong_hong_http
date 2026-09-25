@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from ipaddress import IPv6Address
+from itertools import count
 from urllib.parse import urlencode
 
 from .const import DEFAULT_PORT, MAX_RESPONSE_BYTES, REQUEST_TIMEOUT
 
 READ_SIZE = 64 * 1024
+LOGGER = logging.getLogger(__name__)
 
 
 class ZhonghongTransportError(Exception):
@@ -187,11 +190,17 @@ class ZhonghongTransport:
         self._max_response_bytes = max_response_bytes
         credentials = f"{username}:{password}".encode()
         self._authorization = base64.b64encode(credentials).decode("ascii")
+        self._request_ids = count(1)
 
     async def async_request(
         self, parameters: Sequence[tuple[str, str | int]]
     ) -> TransportResponse:
         """Send a GET request and return the parsed body."""
+        request_id = next(self._request_ids)
+        safe_fields = {
+            name: value for name, value in parameters if name in {"f", "p", "idx"}
+        }
+        LOGGER.debug("Starting gateway request %s: %s", request_id, safe_fields)
         target = f"/cgi-bin/api.html?{urlencode(parameters)}"
         request = (
             f"GET {target} HTTP/1.1\r\n"
@@ -204,15 +213,33 @@ class ZhonghongTransport:
         ).encode("ascii")
 
         try:
-            raw_response = await asyncio.wait_for(
-                self._async_exchange(request),
-                timeout=self._request_timeout,
+            try:
+                raw_response = await asyncio.wait_for(
+                    self._async_exchange(request),
+                    timeout=self._request_timeout,
+                )
+            except TimeoutError as err:
+                raise ZhonghongTransportError(
+                    f"gateway request timed out after {self._request_timeout:g} seconds"
+                ) from err
+            response = parse_response(raw_response)
+        except ZhonghongTransportError as err:
+            LOGGER.debug(
+                "Gateway request %s failed (%s): %s",
+                request_id,
+                type(err).__name__,
+                err,
+                exc_info=True,
             )
-        except TimeoutError as err:
-            raise ZhonghongTransportError(
-                f"gateway request timed out after {self._request_timeout:g} seconds"
-            ) from err
-        return parse_response(raw_response)
+            raise
+
+        LOGGER.debug(
+            "Gateway request %s completed: transport=%s response_bytes=%s",
+            request_id,
+            response.transport,
+            len(response.body),
+        )
+        return response
 
     async def _async_exchange(self, request: bytes) -> bytes:
         """Exchange bytes with the gateway over one TCP connection."""

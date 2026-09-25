@@ -54,7 +54,7 @@ def _parse_payload(body: bytes) -> dict[str, Any]:
 
 
 class ZhonghongClient:
-    """Asynchronous access to one Zhonghong gateway."""
+    """Asynchronous, serialized access to one Zhonghong gateway."""
 
     def __init__(
         self,
@@ -64,16 +64,18 @@ class ZhonghongClient:
         """Initialize the client."""
         self.transport = transport
         self.profile = profile
+        self._request_lock = asyncio.Lock()
 
     async def async_query_units(self) -> GatewayState:
         """Read and atomically validate all indoor-unit pages."""
-        try:
-            async with asyncio.timeout(QUERY_TIMEOUT):
-                return await self._async_query_units()
-        except TimeoutError as err:
-            raise ZhonghongTransportError(
-                f"gateway query timed out after {QUERY_TIMEOUT:g} seconds"
-            ) from err
+        async with self._request_lock:
+            try:
+                async with asyncio.timeout(QUERY_TIMEOUT):
+                    return await self._async_query_units()
+            except TimeoutError as err:
+                raise ZhonghongTransportError(
+                    f"gateway query timed out after {QUERY_TIMEOUT:g} seconds"
+                ) from err
 
     async def _async_query_units(self) -> GatewayState:
         """Read all pages in one sequential query operation."""
@@ -121,8 +123,9 @@ class ZhonghongClient:
 
     async def async_query_gateway_info(self) -> GatewayInfo:
         """Read the slow-changing VRF gateway identity and error codes."""
-        response = await self.transport.async_request((("f", 1),))
-        return parse_gateway_info(_parse_payload(response.body))
+        async with self._request_lock:
+            response = await self.transport.async_request((("f", 1),))
+            return parse_gateway_info(_parse_payload(response.body))
 
     async def async_control(
         self,
@@ -182,8 +185,9 @@ class ZhonghongClient:
             ("fan", desired.fan_speed),
             ("idx", desired.index),
         )
-        response = await self.transport.async_request(parameters)
-        _parse_payload(response.body)
+        async with self._request_lock:
+            response = await self.transport.async_request(parameters)
+            _parse_payload(response.body)
         return desired
 
 

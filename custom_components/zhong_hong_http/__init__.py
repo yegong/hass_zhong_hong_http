@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from homeassistant.const import (
     CONF_HOST,
     CONF_PASSWORD,
@@ -32,6 +34,7 @@ from .coordinator import (
 from .monitor import async_setup_other_climate_listener
 from .transport import Endpoint, ZhonghongTransport
 
+LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.CLIMATE]
 
 
@@ -89,10 +92,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ZhonghongConfigEntry) ->
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    if entry.options.get(
+    monitor_enabled = entry.options.get(
         CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
         DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES,
-    ):
+    )
+    LOGGER.debug(
+        "Refresh listener for other climate entities enabled=%s", monitor_enabled
+    )
+    if monitor_enabled:
         async_setup_other_climate_listener(hass, entry)
     return True
 

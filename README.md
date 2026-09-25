@@ -44,7 +44,7 @@
 - 分别使用 `DataUpdateCoordinator` 管理室内机状态和低频网关信息；
 - 使用 `asyncio` TCP transport 兼容实机的 body-only 非标准 HTTP 响应；
 - entity 属性只读取内存状态，不执行网络 I/O；
-- 控制操作成功后在 1 秒和 2 秒分别回读，以设备返回状态为准；控制请求之间不按网关串行化。
+- 控制操作成功后在 1 秒和 2 秒分别回读，以设备返回状态为准；同一 VRF 网关的所有查询和控制请求按顺序执行。
 
 详细的工程约束、模块边界和测试要求见 [AGENTS.md](AGENTS.md)。
 
@@ -119,11 +119,23 @@ HA 中会分别创建一个 VRF 网关 device 和每台室内机 device。网关
 
 VRF 网关 device 下的“刷新室内机状态”按钮会立即读取全部室内机，但不会强制刷新 `f=1` 网关信息。本次读取结束后，下一次定时轮询从此刻重新计时。自动化也可以对任意一个本 Integration 的 climate 实体调用 `homeassistant.update_entity` 来请求同一 coordinator 刷新；按钮更适合作为不依赖具体室内机的显式自动化动作。按钮用于 HA 自动化调用，不要求 HomeKit 本身支持 button entity。
 
-每次控制请求成功后，Integration 会在 1 秒和 2 秒各安排一次后台状态读取，给网关留出状态落地时间；第二次读取也会把下一次周期轮询顺延。连续控制时，新请求会优先用同一内机最近一次已提交但尚未被回读确认的状态补齐完整控制参数，不会等待其他内机或同网关请求完成。
+每次控制请求成功后，Integration 会在 1 秒和 2 秒各安排一次后台状态读取，给网关留出状态落地时间；第二次读取也会把下一次周期轮询顺延。考虑到该 body-only HTTP 网关的并发能力有限，同一 VRF 的 `f=1`、完整 `f=17` 分页读取和 `f=18` 控制会共用一个异步锁串行执行；不同网关之间不互相阻塞。控制的完整参数以最近一次设备轮询状态补齐，不保存本地的未确认控制状态。
 
 启用“其他空调变化时刷新”后，Integration 会监听其他 config entry 创建的 `climate` 实体。其开关/HVAC 模式（entity state）或目标温度变化时，会请求一次室内机状态刷新；本 Integration 自己创建的 climate 会按 config entry 排除，以免形成递归。当前温度等非控制属性变化不会触发刷新。
 
 轮询或手动刷新所得的完整网关快照只以室内机数据判定是否变化；当其中一台内机变化时，也只有那台内机的 climate 实体会写入新 state。通信失败和恢复导致的可用性变化仍会正常发布。
+
+### 调试刷新和控制
+
+如果其他 climate 变化未触发刷新，或 HA 只显示通用的“Communication with the Zhonghong gateway failed”错误，可在 Home Assistant `configuration.yaml` 中临时启用：
+
+```yaml
+logger:
+  logs:
+    custom_components.zhong_hong_http: debug
+```
+
+重启 Home Assistant 后，日志会显示 climate 事件是否被收到及忽略原因、刷新请求是否完成，以及每个网关请求的功能号/页码/内机索引、传输类型、响应大小和异常链。不会输出密码、Authorization header 或完整控制 URL；日志仍可能包含实体 ID、内机地址和本地 IP，公开分享前请脱敏。调试完成后建议移除这些 debug 设置。
 
 ### 升级与卸载
 

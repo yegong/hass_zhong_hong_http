@@ -94,9 +94,9 @@ def _load_modules() -> tuple[ModuleType, ModuleType]:
 
 
 class CoordinatorControlTests(unittest.IsolatedAsyncioTestCase):
-    """Test pending command state and delayed readbacks."""
+    """Test command state selection, failures, and delayed readbacks."""
 
-    async def test_next_command_uses_unconfirmed_submitted_state(self) -> None:
+    async def test_each_command_uses_latest_polled_state(self) -> None:
         coordinator_module, models = _load_modules()
         unit = models.IndoorUnit(1, 1, "Room", False, 1, 24, 28, 2, 0)
 
@@ -133,28 +133,32 @@ class CoordinatorControlTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks)
 
         self.assertFalse(client.calls[0][0].is_on)
-        self.assertTrue(client.calls[1][0].is_on)
+        self.assertFalse(client.calls[1][0].is_on)
         self.assertEqual(coordinator.refresh_count, 2)
 
-    async def test_matching_readback_clears_pending_control(self) -> None:
+    async def test_control_failure_logs_the_specific_cause(self) -> None:
         coordinator_module, models = _load_modules()
         unit = models.IndoorUnit(1, 1, "Room", False, 1, 24, 28, 2, 0)
+
+        class Client:
+            async def async_control(self, base: Any, **changes: Any) -> Any:
+                raise coordinator_module.ZhonghongTransportError(
+                    "gateway returned an empty response"
+                )
+
         entry = SimpleNamespace(options={})
-        coordinator = coordinator_module.ZhonghongCoordinator(
-            object(), entry, SimpleNamespace()
-        )
-        pending = replace(unit, is_on=True, current_temperature=29)
-        coordinator._pending_controls[unit.key] = pending
+        coordinator = coordinator_module.ZhonghongCoordinator(object(), entry, Client())
+        coordinator.data = models.GatewayState({unit.key: unit}, 1, ("body-only",))
 
-        coordinator._clear_confirmed_controls(
-            models.GatewayState(
-                {unit.key: replace(pending, current_temperature=30)},
-                1,
-                ("standard",),
-            )
-        )
+        with (
+            self.assertLogs(coordinator_module.LOGGER, level="ERROR") as logs,
+            self.assertRaises(_TranslatedError),
+        ):
+            await coordinator.async_control_unit(unit.key, is_on=True)
 
-        self.assertNotIn(unit.key, coordinator._pending_controls)
+        output = "\n".join(logs.output)
+        self.assertIn("ZhonghongTransportError", output)
+        self.assertIn("gateway returned an empty response", output)
 
 
 if __name__ == "__main__":

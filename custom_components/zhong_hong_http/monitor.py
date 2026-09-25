@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.const import ATTR_TEMPERATURE, EVENT_STATE_CHANGED
@@ -16,6 +17,8 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN
 
+LOGGER = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from .coordinator import ZhonghongConfigEntry
 
@@ -27,6 +30,7 @@ def async_setup_other_climate_listener(
 ) -> None:
     """Refresh indoor units when another integration's climate control changes."""
     entity_registry = er.async_get(hass)
+    LOGGER.debug("Enabled refresh listener for other climate entities")
 
     @callback
     def _is_climate_event(event_data: EventStateChangedData) -> bool:
@@ -35,25 +39,47 @@ def async_setup_other_climate_listener(
     @callback
     def _handle_climate_change(event: Event[EventStateChangedData]) -> None:
         entity_id = event.data["entity_id"]
+        old_state = event.data["old_state"]
+        new_state = event.data["new_state"]
+        LOGGER.debug(
+            "Observed climate event for %s: state=%s->%s target_temperature=%s->%s",
+            entity_id,
+            old_state.state if old_state is not None else None,
+            new_state.state if new_state is not None else None,
+            old_state.attributes.get(ATTR_TEMPERATURE)
+            if old_state is not None
+            else None,
+            new_state.attributes.get(ATTR_TEMPERATURE)
+            if new_state is not None
+            else None,
+        )
         registry_entry = entity_registry.async_get(entity_id)
         if (
             registry_entry is not None
             and registry_entry.config_entry_id == entry.entry_id
         ):
+            LOGGER.debug("Ignoring own climate entity %s", entity_id)
             return
 
-        old_state = event.data["old_state"]
-        new_state = event.data["new_state"]
-        if (
-            old_state is None
-            or new_state is None
-            or not climate_control_state_changed(old_state, new_state)
-        ):
+        if old_state is None or new_state is None:
+            LOGGER.debug(
+                "Ignoring climate event for %s without both old and new state",
+                entity_id,
+            )
+            return
+        if not climate_control_state_changed(old_state, new_state):
+            LOGGER.debug(
+                "Ignoring climate event for %s without a control-state change",
+                entity_id,
+            )
             return
 
+        LOGGER.debug(
+            "Requesting indoor-unit refresh for climate event from %s", entity_id
+        )
         entry.async_create_background_task(
             hass,
-            entry.runtime_data.coordinator.async_request_refresh(),
+            _async_request_refresh(entry, entity_id),
             f"{DOMAIN} refresh after external climate change",
         )
 
@@ -63,6 +89,20 @@ def async_setup_other_climate_listener(
             _handle_climate_change,
             event_filter=_is_climate_event,
         )
+    )
+
+
+async def _async_request_refresh(
+    entry: ZhonghongConfigEntry,
+    source_entity_id: str,
+) -> None:
+    """Request and log a refresh caused by another climate entity."""
+    coordinator = entry.runtime_data.coordinator
+    await coordinator.async_request_refresh()
+    LOGGER.debug(
+        "Refresh request for climate event from %s completed: success=%s",
+        source_entity_id,
+        coordinator.last_update_success,
     )
 
 
