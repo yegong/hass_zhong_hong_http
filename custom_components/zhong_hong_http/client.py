@@ -54,7 +54,7 @@ def _parse_payload(body: bytes) -> dict[str, Any]:
 
 
 class ZhonghongClient:
-    """Asynchronous, serialized access to one Zhonghong gateway."""
+    """Asynchronous access to one Zhonghong gateway."""
 
     def __init__(
         self,
@@ -64,21 +64,19 @@ class ZhonghongClient:
         """Initialize the client."""
         self.transport = transport
         self.profile = profile
-        self._request_lock = asyncio.Lock()
 
     async def async_query_units(self) -> GatewayState:
         """Read and atomically validate all indoor-unit pages."""
-        async with self._request_lock:
-            try:
-                async with asyncio.timeout(QUERY_TIMEOUT):
-                    return await self._async_query_units_locked()
-            except TimeoutError as err:
-                raise ZhonghongTransportError(
-                    f"gateway query timed out after {QUERY_TIMEOUT:g} seconds"
-                ) from err
+        try:
+            async with asyncio.timeout(QUERY_TIMEOUT):
+                return await self._async_query_units()
+        except TimeoutError as err:
+            raise ZhonghongTransportError(
+                f"gateway query timed out after {QUERY_TIMEOUT:g} seconds"
+            ) from err
 
-    async def _async_query_units_locked(self) -> GatewayState:
-        """Read all pages while the caller holds the request lock."""
+    async def _async_query_units(self) -> GatewayState:
+        """Read all pages in one sequential query operation."""
         units: dict[UnitKey, IndoorUnit] = {}
         indexes: set[int] = set()
         transports: list[str] = []
@@ -123,9 +121,8 @@ class ZhonghongClient:
 
     async def async_query_gateway_info(self) -> GatewayInfo:
         """Read the slow-changing VRF gateway identity and error codes."""
-        async with self._request_lock:
-            response = await self.transport.async_request((("f", 1),))
-            return parse_gateway_info(_parse_payload(response.body))
+        response = await self.transport.async_request((("f", 1),))
+        return parse_gateway_info(_parse_payload(response.body))
 
     async def async_control(
         self,
@@ -135,7 +132,7 @@ class ZhonghongClient:
         mode: int | None = None,
         target_temperature: float | None = None,
         fan_speed: int | None = None,
-    ) -> None:
+    ) -> IndoorUnit:
         """Submit a complete control state for one indoor unit."""
         requested_temperature = (
             None if target_temperature is None else float(target_temperature)
@@ -185,9 +182,9 @@ class ZhonghongClient:
             ("fan", desired.fan_speed),
             ("idx", desired.index),
         )
-        async with self._request_lock:
-            response = await self.transport.async_request(parameters)
-            _parse_payload(response.body)
+        response = await self.transport.async_request(parameters)
+        _parse_payload(response.body)
+        return desired
 
 
 __all__ = [

@@ -10,14 +10,16 @@
           "port": "Port",
           "username": "Username",
           "password": "Password",
-          "scan_interval": "Indoor-unit polling interval"
+          "scan_interval": "Indoor-unit polling interval",
+          "refresh_on_other_climate_changes": "Refresh on other climate changes"
         },
         "data_description": {
           "host": "The hostname or IP address without http:// or a path.",
           "port": "The local HTTP port.",
           "username": "The HTTP Basic Auth username.",
           "password": "The HTTP Basic Auth password. Leave empty for the factory default.",
-          "scan_interval": "How often to refresh indoor-unit state, from 5 to 300 seconds."
+          "scan_interval": "How often to refresh indoor-unit state, from 5 to 300 seconds.",
+          "refresh_on_other_climate_changes": "Refresh indoor-unit state when a climate from another integration changes HVAC mode, on/off state, or target temperature."
         }
       },
       "reconfigure": {
@@ -62,12 +64,14 @@
     "step": {
       "init": {
         "title": "Zhonghong HTTP options",
-        "description": "Configure indoor-unit polling. Gateway identity and error codes are refreshed every 5 minutes.",
+        "description": "Configure indoor-unit refresh behavior. Gateway identity and error codes are refreshed every 5 minutes.",
         "data": {
-          "scan_interval": "Indoor-unit polling interval"
+          "scan_interval": "Indoor-unit polling interval",
+          "refresh_on_other_climate_changes": "Refresh on other climate changes"
         },
         "data_description": {
-          "scan_interval": "How often to refresh indoor-unit state, from 5 to 300 seconds."
+          "scan_interval": "How often to refresh indoor-unit state, from 5 to 300 seconds.",
+          "refresh_on_other_climate_changes": "Refresh indoor-unit state when a climate from another integration changes HVAC mode, on/off state, or target temperature."
         }
       }
     }

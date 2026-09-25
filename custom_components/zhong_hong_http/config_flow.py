@@ -23,6 +23,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -33,9 +34,11 @@ from homeassistant.helpers.selector import (
 
 from .client import ZhonghongApiError, ZhonghongClient
 from .const import (
+    CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
     CONF_SCAN_INTERVAL,
     DEFAULT_PASSWORD,
     DEFAULT_PORT,
+    DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USERNAME,
     DOMAIN,
@@ -98,6 +101,15 @@ def _schema(
                 default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
             )
         ] = _scan_interval_selector()
+        fields[
+            probatio.Required(
+                CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+                default=defaults.get(
+                    CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+                    DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+                ),
+            )
+        ] = BooleanSelector()
     return probatio.Schema(fields)
 
 
@@ -181,7 +193,13 @@ class ZhonghongHttpConfigFlow(ConfigFlow, domain=DOMAIN):
                     options={
                         CONF_SCAN_INTERVAL: int(
                             user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-                        )
+                        ),
+                        CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES: bool(
+                            user_input.get(
+                                CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+                                DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+                            )
+                        ),
                     },
                 )
 
@@ -270,7 +288,7 @@ class ZhonghongHttpConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class ZhonghongOptionsFlow(OptionsFlowWithReload):
-    """Configure the indoor-unit polling interval."""
+    """Configure indoor-unit refresh behavior."""
 
     @override
     async def async_step_init(
@@ -280,7 +298,12 @@ class ZhonghongOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             return self.async_create_entry(
                 title="",
-                data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])},
+                data={
+                    CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
+                    CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES: bool(
+                        user_input[CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES]
+                    ),
+                },
             )
 
         return self.async_show_form(
@@ -292,7 +315,14 @@ class ZhonghongOptionsFlow(OptionsFlowWithReload):
                         default=self.config_entry.options.get(
                             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
-                    ): _scan_interval_selector()
+                    ): _scan_interval_selector(),
+                    probatio.Required(
+                        CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+                        default=self.config_entry.options.get(
+                            CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+                            DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+                        ),
+                    ): BooleanSelector(),
                 }
             ),
         )

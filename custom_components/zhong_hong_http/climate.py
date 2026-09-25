@@ -30,7 +30,7 @@ from .const import (
 from .coordinator import ZhonghongConfigEntry, ZhonghongCoordinator
 from .models import IndoorUnit, UnitKey
 
-PARALLEL_UPDATES = 1
+PARALLEL_UPDATES = 0
 
 DEVICE_TO_HVAC_MODE: dict[int, HVACMode] = {
     MODE_COOL: HVACMode.COOL,
@@ -121,6 +121,8 @@ class ZhonghongClimate(CoordinatorEntity[ZhonghongCoordinator], ClimateEntity):
         """Initialize an indoor-unit climate entity."""
         super().__init__(coordinator)
         self._key = key
+        self._last_published_unit = self._unit
+        self._last_published_update_success = coordinator.last_update_success
         profile = coordinator.client.profile
         self._attr_min_temp = profile.minimum_temperature
         self._attr_max_temp = profile.maximum_temperature
@@ -143,6 +145,21 @@ class ZhonghongClimate(CoordinatorEntity[ZhonghongCoordinator], ClimateEntity):
             name=device_name,
             via_device_id=gateway_device_id,
         )
+
+    @callback
+    @override
+    def _handle_coordinator_update(self) -> None:
+        """Publish only when this unit or its availability actually changed."""
+        unit = self._unit
+        update_success = self.coordinator.last_update_success
+        if (
+            unit == self._last_published_unit
+            and update_success == self._last_published_update_success
+        ):
+            return
+        self._last_published_unit = unit
+        self._last_published_update_success = update_success
+        super()._handle_coordinator_update()
 
     @property
     def _unit(self) -> IndoorUnit | None:

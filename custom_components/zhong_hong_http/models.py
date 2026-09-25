@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
 UnitKey: TypeAlias = tuple[int, int]
@@ -49,8 +49,8 @@ class GatewayState:
     """Complete, atomically published gateway state."""
 
     units: dict[UnitKey, IndoorUnit]
-    page_count: int
-    response_transports: tuple[str, ...]
+    page_count: int = field(compare=False)
+    response_transports: tuple[str, ...] = field(compare=False)
 
 
 def _required_int(payload: dict[str, Any], field: str) -> int:

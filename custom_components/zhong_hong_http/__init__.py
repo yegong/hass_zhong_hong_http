@@ -14,8 +14,10 @@ from homeassistant.helpers import device_registry as dr
 
 from .client import ZhonghongClient
 from .const import (
+    CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
     DEFAULT_PASSWORD,
     DEFAULT_PORT,
+    DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES,
     DEFAULT_USERNAME,
     DOMAIN,
     MANUFACTURER,
@@ -27,6 +29,7 @@ from .coordinator import (
     ZhonghongGatewayCoordinator,
     ZhonghongRuntimeData,
 )
+from .monitor import async_setup_other_climate_listener
 from .transport import Endpoint, ZhonghongTransport
 
 PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.CLIMATE]
@@ -86,6 +89,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ZhonghongConfigEntry) ->
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    if entry.options.get(
+        CONF_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+        DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES,
+    ):
+        async_setup_other_climate_listener(hass, entry)
     return True
 
 

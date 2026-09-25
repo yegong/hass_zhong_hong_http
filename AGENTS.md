@@ -74,7 +74,7 @@
 - `grp`、各类 lock、`highestVal`、`lowestVal`、`FlowDirection1/2` 和 `MainRmc` 当前均不使用；
 - 同一 `oa` 下不能同时运行不同 HVAC 模式，但约束由空调主机处理，Integration 不预判或联动其它室内机；
 - 已确认控制请求为 `GET /cgi-bin/api.html?f=18&on=...&mode=...&tempSet=...&fan=...&idx=...`，参数使用普通单个 `&`；`FlowDirection1/2` 不需要发送；成功响应为 body-only `{"err":0}`；
-- 控制按完整状态提交。修改一个字段时使用最新缓存补齐其它字段；同一网关写入串行化，并在锁内完成整网关回读。
+- 控制按完整状态提交。修改一个字段时优先使用该内机已提交但尚未确认的状态补齐其它字段，否则使用最新轮询缓存；同一网关的控制请求不做全局串行化。控制成功后在 1 秒和 2 秒分别触发一次整网关回读。
 
 以下未被实机覆盖的内容仍只能视为“参考实现观察”。
 
@@ -137,6 +137,7 @@ custom_components/zhong_hong_http/
 ├── models.py            # 严格类型、不可变或可比较的网关/室内机状态
 ├── profile.py           # 协议未提供的温度范围等显式、可迁移能力假设
 ├── coordinator.py       # 室内机/网关信息轮询、可用性与错误映射
+├── monitor.py           # 可选的外部 climate 变化刷新触发器
 ├── entity.py            # 共享 CoordinatorEntity 基类（有真实共性时才创建）
 ├── button.py            # 网关级室内机立即刷新动作
 ├── climate.py           # 纯内存属性和异步控制方法
@@ -158,7 +159,7 @@ tests/
 职责边界：
 
 - `transport.py` 只处理 HTTP 字节、认证、超时和响应兼容；
-- `client.py` 负责 URL 参数、分页协议、原始响应校验、枚举转换和写入串行化；
+- `client.py` 负责 URL 参数、分页协议、原始响应校验和枚举转换；
 - `models.py` 表达稳定领域语义，不向 HA 层泄漏 `tempSet` 等来源字段名；
 - `coordinator.py` 一次轮询整个网关并生成按稳定室内机 ID 索引的数据；
 - `climate.py` 只把 coordinator 内存状态映射为 HA 属性，不能在 property 中 I/O；
@@ -192,12 +193,13 @@ ConfigEntry -> async client -> coordinator -> climate entities
 - 所有网络 I/O 使用 async；因实机返回 body-only 响应，transport 使用 `asyncio.open_connection`，不得切换为阻塞客户端；
 - 室内机状态和网关慢速信息分别由 `DataUpdateCoordinator` 协调，并在 setup 时调用 `async_config_entry_first_refresh()`；
 - 数据模型可比较时设置 `always_update=False`，减少无变化状态写入；
+- 网关状态快照只以室内机数据判等；coordinator 通知后，每个 climate 实体还需独立比较自身室内机快照，只为真实变化或可用性变化写入 HA state；
 - 室内机轮询间隔由 options 限制为 5–300 秒；网关身份、版本和错误码固定每 5 分钟轮询；
 - VRF 网关 device 提供室内机状态刷新 button；按下后立即刷新室内机 coordinator 并重置其下一次轮询计时，不强制刷新网关信息 coordinator；
 - coordinator 负责把通信错误转换为 `UpdateFailed`，首次连接失败交由 `ConfigEntryNotReady` 路径；认证失败使用相应 auth flow；
 - entity 继承 `CoordinatorEntity`，由 coordinator 可用性驱动 unavailable；
 - 动态新增室内机必须能在不重载 Integration 的情况下添加 entity。室内机暂时缺失时先标记不可用；删除 stale device 前需要明确、保守的策略；
-- 设置适当的 `PARALLEL_UPDATES`；coordinator 只串行化读，不自动保护写操作，因此 client 仍需写锁。
+- 设置适当的 `PARALLEL_UPDATES`；控制请求无需按网关串行化，分页查询只保证单次查询内的页面顺序。
 
 ### Climate 映射
 

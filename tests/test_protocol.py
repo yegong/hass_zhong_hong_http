@@ -29,6 +29,7 @@ profile_module = importlib.import_module(f"{PACKAGE_NAME}.profile")
 
 ZhonghongClient = client_module.ZhonghongClient
 IndoorUnit = models_module.IndoorUnit
+GatewayState = models_module.GatewayState
 ZhonghongDataError = models_module.ZhonghongDataError
 parse_gateway_info = models_module.parse_gateway_info
 parse_indoor_unit = models_module.parse_indoor_unit
@@ -48,6 +49,12 @@ class ConfigurationConstantsTests(unittest.TestCase):
     ) -> None:
         self.assertEqual(const_module.MIN_SCAN_INTERVAL, 5)
         self.assertEqual(const_module.MAX_SCAN_INTERVAL, 300)
+
+    def test_other_climate_refresh_is_opt_in(self) -> None:
+        self.assertFalse(const_module.DEFAULT_REFRESH_ON_OTHER_CLIMATE_CHANGES)
+
+    def test_control_readbacks_are_delayed_one_and_two_seconds(self) -> None:
+        self.assertEqual(const_module.CONTROL_REFRESH_DELAYS, (1.0, 2.0))
 
 
 def _unit_payload(**updates: object) -> dict[str, object]:
@@ -133,6 +140,22 @@ class ModelTests(unittest.TestCase):
     def test_rejects_non_numeric_temperature(self) -> None:
         with self.assertRaisesRegex(ZhonghongDataError, "tempIn"):
             parse_indoor_unit(_unit_payload(tempIn="unknown"))
+
+    def test_gateway_state_equality_only_compares_indoor_units(self) -> None:
+        unit = parse_indoor_unit(_unit_payload())
+
+        first = GatewayState({unit.key: unit}, 2, ("body-only", "body-only"))
+        second = GatewayState({unit.key: unit}, 3, ("standard",))
+
+        self.assertEqual(first, second)
+        self.assertNotEqual(
+            first,
+            GatewayState(
+                {unit.key: parse_indoor_unit(_unit_payload(tempIn="30"))},
+                2,
+                ("body-only",),
+            ),
+        )
 
 
 class ResponseTests(unittest.TestCase):
@@ -291,7 +314,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         client = ZhonghongClient(transport)
         unit = parse_indoor_unit(_unit_payload())
 
-        await client.async_control(unit, is_on=True, target_temperature=25)
+        desired = await client.async_control(unit, is_on=True, target_temperature=25)
 
         self.assertEqual(
             transport.requests,
@@ -310,6 +333,8 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("FlowDirection1", parameter_names)
         self.assertNotIn("FlowDirection2", parameter_names)
         self.assertNotIn("alarm", parameter_names)
+        self.assertTrue(desired.is_on)
+        self.assertEqual(desired.target_temperature, 25)
 
     async def test_control_preserves_unmapped_cached_enums(self) -> None:
         transport = FakeTransport([_response({"err": 0})])
@@ -335,7 +360,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             await client.async_control(unit, target_temperature=17)
         await client.async_control(unit, target_temperature=18)
 
-    async def test_control_requests_are_serialized(self) -> None:
+    async def test_control_requests_are_not_serialized_by_gateway(self) -> None:
         transport = FakeTransport([_response({"err": 0}), _response({"err": 0})])
         client = ZhonghongClient(transport)
         unit = parse_indoor_unit(_unit_payload())
@@ -345,7 +370,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             client.async_control(unit, target_temperature=25),
         )
 
-        self.assertEqual(transport.max_in_flight, 1)
+        self.assertEqual(transport.max_in_flight, 2)
 
     async def test_whole_query_has_total_timeout(self) -> None:
         class SlowTransport(FakeTransport):

@@ -19,20 +19,21 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .client import ZhonghongApiError, ZhonghongClient
 from .const import (
     CONF_SCAN_INTERVAL,
+    CONTROL_REFRESH_DELAYS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     GATEWAY_INFO_INTERVAL,
     SUPPORTED_FAN_SPEEDS,
     SUPPORTED_MODES,
 )
-from .models import GatewayInfo, GatewayState, UnitKey, ZhonghongDataError
+from .models import GatewayInfo, GatewayState, IndoorUnit, UnitKey, ZhonghongDataError
 from .transport import ZhonghongAuthenticationError, ZhonghongTransportError
 
 LOGGER = logging.getLogger(__name__)
 
 
 class ZhonghongCoordinator(DataUpdateCoordinator[GatewayState]):
-    """Coordinate whole-gateway polling and serialized entity commands."""
+    """Coordinate whole-gateway polling and entity commands."""
 
     def __init__(
         self,
@@ -54,7 +55,7 @@ class ZhonghongCoordinator(DataUpdateCoordinator[GatewayState]):
             always_update=False,
         )
         self.client = client
-        self._command_lock = asyncio.Lock()
+        self._pending_controls: dict[UnitKey, IndoorUnit] = {}
         self._logged_unknown_modes: set[int] = set()
         self._logged_unknown_fans: set[int] = set()
 
@@ -69,8 +70,16 @@ class ZhonghongCoordinator(DataUpdateCoordinator[GatewayState]):
             ) from err
         except (ZhonghongTransportError, ZhonghongApiError, ZhonghongDataError) as err:
             raise UpdateFailed(str(err)) from err
+        self._clear_confirmed_controls(state)
         self._log_unknown_values(state)
         return state
+
+    def _clear_confirmed_controls(self, state: GatewayState) -> None:
+        """Discard pending command states once their control fields are read back."""
+        for key, pending in tuple(self._pending_controls.items()):
+            current = state.units.get(key)
+            if current is not None and _same_control_state(current, pending):
+                self._pending_controls.pop(key, None)
 
     def _log_unknown_values(self, state: GatewayState) -> None:
         """Log each unsupported device enum once without changing its meaning."""
@@ -105,47 +114,66 @@ class ZhonghongCoordinator(DataUpdateCoordinator[GatewayState]):
         target_temperature: float | None = None,
         fan_speed: int | None = None,
     ) -> None:
-        """Control a unit from its latest state, then refresh the whole gateway."""
-        async with self._command_lock:
-            unit = self.data.units.get(key)
-            if unit is None:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="unit_unavailable",
-                )
-            try:
-                await self.client.async_control(
-                    unit,
-                    is_on=is_on,
-                    mode=mode,
-                    target_temperature=target_temperature,
-                    fan_speed=fan_speed,
-                )
-            except ZhonghongAuthenticationError as err:
-                self.config_entry.async_start_reauth(self.hass)
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="invalid_auth",
-                ) from err
-            except (
-                ZhonghongTransportError,
-                ZhonghongApiError,
-                ZhonghongDataError,
-            ) as err:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="communication_error",
-                ) from err
-            except ValueError as err:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="invalid_control_value",
-                    translation_placeholders={"error": str(err)},
-                ) from err
+        """Control a unit and schedule two delayed device readbacks."""
+        unit = self._pending_controls.get(key) or self.data.units.get(key)
+        if unit is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="unit_unavailable",
+            )
+        try:
+            desired = await self.client.async_control(
+                unit,
+                is_on=is_on,
+                mode=mode,
+                target_temperature=target_temperature,
+                fan_speed=fan_speed,
+            )
+        except ZhonghongAuthenticationError as err:
+            self.config_entry.async_start_reauth(self.hass)
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_auth",
+            ) from err
+        except (
+            ZhonghongTransportError,
+            ZhonghongApiError,
+            ZhonghongDataError,
+        ) as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="communication_error",
+            ) from err
+        except ValueError as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_control_value",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
-            # Complete the device readback while holding the command lock so a
-            # following read-modify-write command cannot use stale cached data.
-            await self.async_refresh()
+        self._pending_controls[key] = desired
+        for delay in CONTROL_REFRESH_DELAYS:
+            self.config_entry.async_create_background_task(
+                self.hass,
+                self._async_refresh_after(delay),
+                f"{DOMAIN} control readback after {delay:g}s",
+            )
+
+    async def _async_refresh_after(self, delay: float) -> None:
+        """Request one coordinator refresh after a control-settling delay."""
+        await asyncio.sleep(delay)
+        await self.async_refresh()
+
+
+def _same_control_state(first: IndoorUnit, second: IndoorUnit) -> bool:
+    """Return whether two snapshots have identical writable control fields."""
+    return (
+        first.is_on == second.is_on
+        and first.mode == second.mode
+        and first.target_temperature == second.target_temperature
+        and first.fan_speed == second.fan_speed
+        and first.index == second.index
+    )
 
 
 class ZhonghongGatewayCoordinator(DataUpdateCoordinator[GatewayInfo]):
