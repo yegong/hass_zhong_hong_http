@@ -1,0 +1,89 @@
+{
+  "title": "中弘 HTTP",
+  "config": {
+    "step": {
+      "user": {
+        "title": "连接中弘 VRF 网关",
+        "description": "连接 VRF Admin Panel 的本地 HTTP 接口。",
+        "data": {
+          "host": "主机",
+          "port": "端口",
+          "username": "用户名",
+          "password": "密码",
+          "scan_interval": "室内机轮询间隔"
+        },
+        "data_description": {
+          "host": "不包含 http:// 和路径的主机名或 IP 地址。",
+          "port": "本地 HTTP 端口。",
+          "username": "HTTP Basic Auth 用户名。",
+          "password": "HTTP Basic Auth 密码；出厂默认值为空。",
+          "scan_interval": "室内机状态刷新间隔，可设置为 5 至 15 秒。"
+        }
+      },
+      "reconfigure": {
+        "title": "重新配置中弘 VRF 网关",
+        "description": "更新网关连接设置。",
+        "data": {
+          "host": "主机",
+          "port": "端口",
+          "username": "用户名",
+          "password": "密码"
+        },
+        "data_description": {
+          "host": "不包含 http:// 和路径的主机名或 IP 地址。",
+          "port": "本地 HTTP 端口。",
+          "username": "HTTP Basic Auth 用户名。",
+          "password": "HTTP Basic Auth 密码。"
+        }
+      },
+      "reauth_confirm": {
+        "title": "更新中弘网关认证信息",
+        "description": "请输入有效的 HTTP Basic Auth 认证信息。",
+        "data": {
+          "username": "用户名",
+          "password": "密码"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接网关",
+      "invalid_auth": "网关拒绝了认证信息",
+      "invalid_host": "主机或端口无效",
+      "invalid_response": "网关返回了不支持的响应",
+      "unknown": "发生未知错误"
+    },
+    "abort": {
+      "already_configured": "该网关已配置",
+      "reauth_successful": "认证信息更新成功",
+      "reconfigure_successful": "网关配置更新成功"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "中弘 HTTP 选项",
+        "description": "设置室内机轮询间隔。网关身份、版本和错误码每 5 分钟刷新一次。",
+        "data": {
+          "scan_interval": "室内机轮询间隔"
+        },
+        "data_description": {
+          "scan_interval": "室内机状态刷新间隔，可设置为 5 至 15 秒。"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "communication_error": {
+      "message": "与中弘网关通信失败。"
+    },
+    "invalid_auth": {
+      "message": "中弘网关拒绝了认证信息。"
+    },
+    "invalid_control_value": {
+      "message": "请求的设置不受支持：{error}"
+    },
+    "unit_unavailable": {
+      "message": "该室内机当前不可用。"
+    }
+  }
+}

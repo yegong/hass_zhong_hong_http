@@ -16,7 +16,7 @@
 
 ## 当前阶段和执行边界
 
-当前资料来自 `references/` 下的历史 Node-RED 流程，尚未经过 EigenStone 实机逐项验证。开始实现或改变协议语义前，必须先区分：
+当前资料同时包含 `references/` 下的历史 Node-RED 流程和用户提供的 EigenStone 实机结果。开始实现或改变协议语义前，必须继续区分：
 
 - **已确认**：由用户实机响应、抓包或自动化测试 fixture 证明；
 - **参考实现观察**：只在 Node-RED 流程中出现；
@@ -43,44 +43,55 @@
 
 压缩包是只读证据。不要改写它们；需要 fixture 时，将脱敏后的最小响应样本单独放进 `tests/fixtures/`，并记录其来源和已做的脱敏。
 
-## 从 Node-RED 参考实现提取的协议事实
+## 协议事实和参考观察
 
-以下均属于“参考实现观察”，不是最终协议规格。
+### 已由 EigenStone 实机确认
+
+- 所有接口使用 HTTP Basic Auth；默认用户名为 `admin`、默认密码为空；
+- 网关响应没有 HTTP 状态行或 headers，连接中直接返回 JSON body。请求本身仍发送普通 HTTP/1.1 GET；
+- 网关信息请求为 `GET /cgi-bin/api.html?f=1`，确认响应字段：
+  - `model`：型号代码；
+  - `sw`：软件版本，可能含尾随空格；
+  - `id`：设备编号，用作网关稳定标识；
+  - `hwerror`：VRF 错误码；
+  - `moduleerror`：第三方模块错误码；
+- 网关信息每 5 分钟刷新一次，不随室内机状态密集轮询；
+- VRF 网关和每台室内机在 HA device registry 中分别表示，室内机通过 `via_device_id` 关联到网关；
+- 室内机状态请求为 `GET /cgi-bin/api.html?f=17&p=<page>`，页码从 `0` 开始；实机每个非空页最多返回 5 台室内机，遇到空 `unit` 数组结束；
+- 实机成功响应中的 `err` 是数字 `0`；为兼容参考流程，解析也接受字符串 `"0"`；
+- 室内机状态轮询可由 config flow/options 配置为 5–15 秒；
+- 室内机字段语义：
+  - `oa`：空调系统/外机编号；
+  - `ia`：室内机编号；
+  - `nm`：Admin Panel 设置的室内机名称；
+  - `on`：开关状态；
+  - `mode`：`1` 制冷、`2` 除湿、`4` 送风、`8` 制热；
+  - `tempSet`：目标温度；
+  - `tempIn`：当前室内温度；
+  - `fan`：`1` 高、`2` 中、`4` 低；
+  - `idx`：控制请求使用的室内机索引；
+- `alarm` 已确认与滤网无关，Integration 直接忽略，不用于实体、诊断或控制；
+- `grp`、各类 lock、`highestVal`、`lowestVal`、`FlowDirection1/2` 和 `MainRmc` 当前均不使用；
+- 同一 `oa` 下不能同时运行不同 HVAC 模式，但约束由空调主机处理，Integration 不预判或联动其它室内机；
+- 已确认控制请求为 `GET /cgi-bin/api.html?f=18&on=...&mode=...&tempSet=...&fan=...&idx=...`，参数使用普通单个 `&`；`FlowDirection1/2` 不需要发送；成功响应为 body-only `{"err":0}`；
+- 控制按完整状态提交。修改一个字段时使用最新缓存补齐其它字段；同一网关写入串行化，并在锁内完成整网关回读。
+
+以下未被实机覆盖的内容仍只能视为“参考实现观察”。
 
 ### 查询
 
-- 请求形式：`GET http://<host>/cgi-bin/api.html?f=17&p=<page>`；
-- 页码从 `0` 开始递增；
-- 响应被当作 JSON，成功条件为 `err == "0"`；具体设备是否返回数字 `0` 待验证；
-- 响应中的 `unit` 是本页室内机数组；遇到空数组即结束本轮分页；
-- 已观察字段：
-  - `idx`：控制请求使用的索引；
-  - `oa`：外机地址；
-  - `ia`：内机地址；
-  - `nm`：部分流程使用的名称；
-  - `on`：开关；
-  - `mode`：运行模式代码；
-  - `tempSet`：目标温度；
-  - `tempIn`：室内温度；
-  - `fan`：风速代码。
 - 参考流程用 `ac_<oa>_<ia>` 标识室内机；在 HA 中还必须加入网关/config-entry 范围，防止多个网关发生 entity unique ID 冲突。
 
 分页实现必须有最大页数、总超时、重复页检测和异常数据保护，不能只依赖空数组结束，否则设备异常时可能形成无限轮询。
 
 ### 控制
 
-- 请求形式：`GET http://<host>/cgi-bin/api.html?f=18&idx=...&on=...&mode=...&tempSet=...&fan=...`；
-- 协议看起来采用“提交完整状态”而非单字段 patch。修改一个字段时，应以该室内机最新缓存状态合成完整控制请求；
-- 并发控制可能产生 read-modify-write 丢失，所有同一网关的写操作必须序列化；
-- 成功写入后请求 coordinator refresh，最终状态以设备回读为准；不要长期保留与设备不一致的 optimistic state；
 - 一个较新的流程对指定新风内机只发送 `idx` 和 `on`，但这依赖硬编码内机地址 `6`。不得把该地址或特殊行为直接写死；先由实机数据或可配置能力确认。
 
 ### 认证和 HTTP 兼容性
 
-- 2022/2024 流程发送 `Authorization: Basic YWRtaW46`，其含义是用户名 `admin`、空密码；
 - 认证信息不得出现在日志、diagnostics 或异常字符串中；diagnostics 必须脱敏 host 之外的敏感字段，是否脱敏 host 按 HA 官方规范处理；
-- 2022/2024 流程使用 `curl --http0.9`，说明设备可能返回非标准 HTTP/0.9 风格响应；2019 流程则使用普通 HTTP Request 节点，行为存在差异；
-- 首选 `aiohttp` 和 Home Assistant 注入的共享 `ClientSession`。只有 fixture 或实机证明 aiohttp 无法解析该设备响应时，才允许在独立 transport 层实现基于 `asyncio.open_connection` 的最小异步兼容传输；
+- 实机已证明响应是 body-only，不能交给严格的标准 HTTP parser；正式 transport 使用 `asyncio.open_connection` 手工读取，兼容 body-only 和标准 HTTP 响应；
 - 禁止把 `curl`、shell、Node-RED 或同步 `requests` 作为 Integration 的运行时方案；禁止为了兼容畸形 HTTP 而污染 coordinator/entity 层。
 
 ### 已观察枚举映射
@@ -89,10 +100,10 @@
 
 | 设备值 | 候选 HA 模式 | 置信度/差异 |
 | --- | --- | --- |
-| `1` | `HVACMode.COOL` | 三份流程一致 |
-| `2` | `HVACMode.DRY` | 三份流程基本一致 |
-| `4` | `HVACMode.FAN_ONLY` | 2019/2024 明确；2022 的展示列表与状态分支冲突 |
-| `8` | `HVACMode.HEAT` | 三份流程一致 |
+| `1` | `HVACMode.COOL` | 实机确认 |
+| `2` | `HVACMode.DRY` | 实机确认 |
+| `4` | `HVACMode.FAN_ONLY` | 实机确认 |
+| `8` | `HVACMode.HEAT` | 实机确认 |
 | `5` | `HVACMode.DRY` | 仅 2022 状态解析出现，待验证 |
 
 风速代码：
@@ -100,9 +111,9 @@
 | 设备值 | HA 风速字符串 | 置信度/差异 |
 | --- | --- | --- |
 | `0` | `auto` | 三份流程一致 |
-| `1` | `high` | 三份流程一致 |
-| `2` | `medium` | 三份流程一致 |
-| `4` | `low` | 三份流程一致 |
+| `1` | `high` | 实机确认 |
+| `2` | `medium` | 实机确认 |
+| `4` | `low` | 实机确认 |
 | `6` | `silent` | 2019/2022 有，2024 HITACHI 流程没有 |
 
 温度范围存在 `18–30 °C` 与 `16–32 °C` 两组参考值。未确认前，不得仅凭流程年份选择；优先从设备能力或实测确定。若协议没有能力字段，再设计明确、可迁移的设备 profile，避免在 entity 中写型号分支。
@@ -111,20 +122,21 @@
 
 ## 目标架构
 
-本项目按 standalone custom integration 组织，暂定 domain 为 `zhong_hong`。若后续需要提交 Home Assistant Core，保持业务和协议模块可迁移，不依赖 HACS 专有运行时 API。
+本项目按 standalone custom integration 组织，domain 为 `zhong_hong_http`，与官方 `zhong_hong` 区分。若后续需要提交 Home Assistant Core，保持业务和协议模块可迁移，不依赖 HACS 专有运行时 API。
 
 建议结构：
 
 ```text
-custom_components/zhong_hong/
+custom_components/zhong_hong_http/
 ├── __init__.py          # config entry 生命周期、runtime_data、平台转发
 ├── manifest.json        # hub / local_polling / config_flow / version
 ├── const.py             # domain、配置键和稳定常量
 ├── config_flow.py       # UI 配置、连接验证、去重、reconfigure/reauth（如适用）
 ├── client.py            # 面向领域的异步 API；不依赖 HA entity
-├── transport.py         # aiohttp；必要时隔离 HTTP/0.9 兼容
+├── transport.py         # 基于 asyncio 的 body-only/标准 HTTP 兼容传输
 ├── models.py            # 严格类型、不可变或可比较的网关/室内机状态
-├── coordinator.py       # 唯一轮询入口、分页聚合、可用性与错误映射
+├── profile.py           # 协议未提供的温度范围等显式、可迁移能力假设
+├── coordinator.py       # 室内机/网关信息轮询、可用性与错误映射
 ├── entity.py            # 共享 CoordinatorEntity 基类（有真实共性时才创建）
 ├── climate.py           # 纯内存属性和异步控制方法
 ├── diagnostics.py       # 脱敏诊断（达到相应阶段时）
@@ -175,10 +187,10 @@ ConfigEntry -> async client -> coordinator -> climate entities
 
 ### 异步与轮询
 
-- 所有网络 I/O 使用 async；首选 `async_get_clientsession(hass)` 注入共享 aiohttp session；
-- 使用 `DataUpdateCoordinator` 对整个网关做一次协调轮询，并在 setup 时调用 `async_config_entry_first_refresh()`；
+- 所有网络 I/O 使用 async；因实机返回 body-only 响应，transport 使用 `asyncio.open_connection`，不得切换为阻塞客户端；
+- 室内机状态和网关慢速信息分别由 `DataUpdateCoordinator` 协调，并在 setup 时调用 `async_config_entry_first_refresh()`；
 - 数据模型可比较时设置 `always_update=False`，减少无变化状态写入；
-- 轮询间隔必须作为有依据的单一常量，不复制 Node-RED 的 500 ms 连续循环。先用实机响应时间和控制体验验证合理值；
+- 室内机轮询间隔由 options 限制为 5–15 秒；网关身份、版本和错误码固定每 5 分钟轮询；
 - coordinator 负责把通信错误转换为 `UpdateFailed`，首次连接失败交由 `ConfigEntryNotReady` 路径；认证失败使用相应 auth flow；
 - entity 继承 `CoordinatorEntity`，由 coordinator 可用性驱动 unavailable；
 - 动态新增室内机必须能在不重载 Integration 的情况下添加 entity。室内机暂时缺失时先标记不可用；删除 stale device 前需要明确、保守的策略；
@@ -237,16 +249,13 @@ ConfigEntry -> async client -> coordinator -> climate entities
 
 开始首版实现前，优先取得以下证据；若用户暂时无法提供，则把假设隔离为 profile/fixture，并保持保守默认：
 
-1. EigenStone 实机的 `f=17&p=0` 脱敏原始响应及最后一页响应；
-2. 实际 HTTP 状态行/headers，确认是否真的需要 HTTP/0.9 兼容；
-3. `f=18` 成功与失败响应，以及是否必须发送所有字段；
-4. 设备支持的温度范围、fan `6`、mode `4/5` 的真实含义；
-5. `idx` 是否跨重启稳定，`oa + ia` 是否在单网关内永久稳定；
-6. 是否存在网关序列号、型号、固件版本或能力 endpoint；
-7. `nm` 的编码、是否为空、是否由用户在 Admin Panel 中可修改；
-8. 是否确有“新风机只允许开关”的 EigenStone 场景，以及如何可靠识别；
-9. Admin Panel 是否允许非空密码或不同用户名；
-10. 合理轮询周期和设备可承受请求速率。
+1. `f=18` 失败响应；
+2. 设备支持的温度范围、fan `0/6`、mode `5` 的真实含义；
+3. `idx` 是否跨重启稳定，`oa + ia` 是否在单网关内永久稳定；
+4. `nm` 的编码边界、是否为空、重命名后的行为；
+5. 是否确有“新风机只允许开关”的 EigenStone 场景，以及如何可靠识别；
+6. Admin Panel 是否允许非空密码或不同用户名；
+7. `hwerror`、`moduleerror` 非零值的完整码表与恢复语义。
 
 在这些问题未确认前，可以实现严格、可测试的框架和已一致的映射，但不要声称覆盖所有中弘/日立/Aqara 变体。
 
@@ -254,7 +263,7 @@ ConfigEntry -> async client -> coordinator -> climate entities
 
 - 每次改动围绕一个清晰目标，协议、HA 平台和无关重构不要混成一个提交；
 - 不修改用户已有的无关文件，不覆盖未提交工作；
-- 新增依赖前说明必要性。优先使用 HA 已提供的 aiohttp 和 helper，避免为很小的协议引入重量级库；
+- 新增依赖前说明必要性。当前协议 transport 只使用 Python 标准库 asyncio，避免为很小的协议引入重量级库；
 - 不为尚未观察到的型号建立复杂兼容层；出现真实差异后以 fixture 驱动 profile/strategy；
 - 协议字段与 HA 领域字段只在一个映射模块转换，禁止复制 magic numbers；
 - 修复失败测试时先判断是协议、领域、HA 生命周期还是工具链问题，在对应层修复；

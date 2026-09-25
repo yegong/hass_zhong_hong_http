@@ -1,0 +1,89 @@
+{
+  "title": "Zhonghong HTTP",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to a Zhonghong VRF gateway",
+        "description": "Connect to the local HTTP interface of the VRF Admin Panel.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "scan_interval": "Indoor-unit polling interval"
+        },
+        "data_description": {
+          "host": "The hostname or IP address without http:// or a path.",
+          "port": "The local HTTP port.",
+          "username": "The HTTP Basic Auth username.",
+          "password": "The HTTP Basic Auth password. Leave empty for the factory default.",
+          "scan_interval": "How often to refresh indoor-unit state, from 5 to 15 seconds."
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Zhonghong VRF gateway",
+        "description": "Update the gateway connection settings.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "The hostname or IP address without http:// or a path.",
+          "port": "The local HTTP port.",
+          "username": "The HTTP Basic Auth username.",
+          "password": "The HTTP Basic Auth password."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Update Zhonghong gateway credentials",
+        "description": "Enter valid HTTP Basic Auth credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the gateway",
+      "invalid_auth": "The gateway rejected the credentials",
+      "invalid_host": "The host or port is invalid",
+      "invalid_response": "The gateway returned an unsupported response",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This gateway is already configured",
+      "reauth_successful": "Credentials updated successfully",
+      "reconfigure_successful": "Gateway configuration updated successfully"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Zhonghong HTTP options",
+        "description": "Configure indoor-unit polling. Gateway identity and error codes are refreshed every 5 minutes.",
+        "data": {
+          "scan_interval": "Indoor-unit polling interval"
+        },
+        "data_description": {
+          "scan_interval": "How often to refresh indoor-unit state, from 5 to 15 seconds."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "communication_error": {
+      "message": "Communication with the Zhonghong gateway failed."
+    },
+    "invalid_auth": {
+      "message": "The Zhonghong gateway rejected the credentials."
+    },
+    "invalid_control_value": {
+      "message": "The requested setting is not supported: {error}"
+    },
+    "unit_unavailable": {
+      "message": "The indoor unit is currently unavailable."
+    }
+  }
+}
